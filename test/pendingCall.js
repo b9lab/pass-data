@@ -61,8 +61,10 @@ contract('PendingCall', function(accounts) {
     var store = TextStore.deployed();
     var pendingCall = PendingCall.deployed();
     var data = store.contract.setText.getData("hello1");
+    var key;
     return pendingCall.pleaseCallOne.call(store.address, data, { gas: 1000000 })
       .then(function (result) {
+        key = result[0];
         assert.equal(result[1].toNumber(), 0, "should be return value of pending");
         return pendingCall.pleaseCallOne(store.address, data, { gas: 1000000 });
       })
@@ -74,6 +76,11 @@ contract('PendingCall', function(accounts) {
       })
       .then(function (text) {
         assert.equal(text, "", "should not have been set");
+        return pendingCall.pendingOnes(key);
+      })
+      .then(function (pendingOne) {
+        assert.equal(pendingOne[0], 1, "should have only 1 call made");
+        assert.equal(pendingOne[1], store.address, "should have saved the target address");
         return pendingCall.pleaseCallOne.call(store.address, data, { gas: 1000000 } );
       })
       .then(function (result) {
