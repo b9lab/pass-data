@@ -1,6 +1,9 @@
+var TextStore = artifacts.require("./TextStore.sol");
+var PendingCall = artifacts.require("./PendingCall.sol");
+
 module.exports = function(deployer, network) {
- 	deployer.deploy([
-		[ TextStore, { gas: 500000 } ],
-		[ PendingCall, { gas: 1000000 } ]
-	]);
+    deployer.deploy([
+        [ TextStore ],
+        [ PendingCall ]
+    ]);
 };

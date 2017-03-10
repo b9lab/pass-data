@@ -1,153 +1,173 @@
-web3.eth.getTransactionReceiptMined = function (txnHash, interval) {
-    var transactionReceiptAsync;
-    interval |= 500;
-    transactionReceiptAsync = function(txnHash, resolve, reject) {
-        try {
-            var receipt = web3.eth.getTransactionReceipt(txnHash);
-            if (receipt == null) {
-                setTimeout(function () {
-                    transactionReceiptAsync(txnHash, resolve, reject);
-                }, interval);
-            } else {
-                resolve(receipt);
-            }
-        } catch(e) {
-            reject(e);
-        }
-    };
+var TextStore = artifacts.require("./TextStore.sol");
+var PendingCall = artifacts.require("./PendingCall.sol");
 
-    return new Promise(function (resolve, reject) {
-        transactionReceiptAsync(txnHash, resolve, reject);
-    });
-};
-
-var expectedExceptionPromise = function (action, gasToUse) {
-  return new Promise(function (resolve, reject) {
-      try {
-        resolve(action());
-      } catch(e) {
-        reject(e);
-      }
-    })
-    .then(function (txn) {
-      return web3.eth.getTransactionReceiptMined(txn);
-    })
-    .then(function (receipt) {
-      // We are in Geth
-      assert.equal(receipt.gasUsed, gasToUse, "should have used all the gas");
-    })
-    .catch(function (e) {
-      if ((e + "").indexOf("invalid JUMP") > -1) {
-        // We are in TestRPC
-      } else {
-        throw e;
-      }
-    });
-};
+Extensions = require("../utils/extensions.js");
+Extensions.init(web3, assert);
 
 contract('PendingCall', function(accounts) {
 
-  it("store should start with empty", function() {
-    
-    var store = TextStore.deployed();
-    return store.text()
-      .then(function(text) {
-        assert.equal(text, "", "should be empty");
-      });
-  });
+    var owner, requester;
+    var textStore, pendingCall;
 
-  it("should pass value only on second call", function() {
+    before("should have enough ether", () => {
+        assert.isAtLeast(accounts.length, 2, "should have at least 2 account");
+        owner = accounts[0];
+        requester = accounts[1];
+        return Extensions.makeSureAreUnlocked([ owner ]);
+    });
 
-    var store = TextStore.deployed();
-    var pendingCall = PendingCall.deployed();
-    var data = store.contract.setText.getData("hello1");
-    var key;
-    return pendingCall.pleaseCallOne.call(store.address, data, { gas: 1000000 })
-      .then(function (result) {
-        key = result[0];
-        assert.equal(result[1].toNumber(), 0, "should be return value of pending");
-        return pendingCall.pleaseCallOne(store.address, data, { gas: 1000000 });
-      })
-      .then(function (txn) {
-        return web3.eth.getTransactionReceiptMined(txn);
-      })
-      .then(function (receipt) {
-        return store.text();
-      })
-      .then(function (text) {
-        assert.equal(text, "", "should not have been set");
-        return pendingCall.pendingOnes(key);
-      })
-      .then(function (pendingOne) {
-        assert.equal(pendingOne[0], 1, "should have only 1 call made");
-        assert.equal(pendingOne[1], store.address, "should have saved the target address");
-        return pendingCall.pleaseCallOne.call(store.address, data, { gas: 1000000 } );
-      })
-      .then(function (result) {
-        assert.equal(result[1].toNumber(), 1, "should be return value of passed-on with true");
-        return pendingCall.pleaseCallOne(store.address, data, { gas: 1000000 });
-      })
-      .then(function (txn) {
-        return web3.eth.getTransactionReceiptMined(txn);
-      })
-      .then(function (receipt) {
-        return store.text();
-      })
-      .then(function (text) {
-        assert.equal(text, "hello1", "should have been set");        
-      });
+    beforeEach("should deploy a TextStore and a PendingCall", function() {
+        return Promise.all([
+                TextStore.new({ from: owner }),
+                PendingCall.new({ from: owner })
+            ])
+            .then(createds => {
+                textStore = createds[0];
+                pendingCall = createds[1];
+                return textStore.text();
+            })
+            .then(text => assert.strictEqual(text, "", "should start as empty"));
+    });
 
-  });
+    it("should not expose internal function", function() {
+        assert.strictEqual(typeof pendingCall.effectCall, "undefined", "should not be a function");
+    });
 
-  it("should throw if trying to make the second call without first", function() {
+    it("should return 0 if ask to call a non-existent pending", function() {
+        var fakeKey = web3.sha3("Not a key");
+        return pendingCall.callPending.call(fakeKey)
+            .then(result => assert.strictEqual(result.toNumber(), 0, "should not have done call"));
+    });
 
-    var store = TextStore.deployed();
-    var pendingCall = PendingCall.deployed();
-    var data = store.contract.setText.getData("hello2");
+    it("should store a pending call if ask the first time", function() {
+        var shaKey0;
+        var callData = textStore.contract.setText.getData("Hello World");
+        return pendingCall.pleaseCallOne.call(textStore.address, callData)
+            .then(results => {
+                shaKey0 = results[0];
+                assert.strictEqual(results[1].toNumber(), 0);
+                return pendingCall.pleaseCallOne(textStore.address, callData);
+            })
+            .then(txObject => pendingCall.pendingOnes(shaKey0))
+            .then(pendingOne => {
+                assert.strictEqual(pendingOne.length, 3, "should only have all data");
+                assert.strictEqual(pendingOne[0].toNumber(), 1, "should have only 1 call made");
+                assert.strictEqual(
+                    pendingOne[1], textStore.address,
+                    "should have saved the target address");
+                assert.strictEqual(pendingOne[2], callData, "should be the call data");
+            });
+    });
 
-    return expectedExceptionPromise(
-        function () { return pendingCall.callPending(store.address, data, { gas: 1000000 }); },
-        1000000);
+    describe("Second time asking", function() {
 
-  });
+        var callData, expectedCallData, shaKey0;
 
-  it("should be possible to make the second call with the hash only", function() {
+        beforeEach("should add a pending call", function() {
+            callData = textStore.contract.setText.getData("Hello World");
+            // Padding to 32 bytes
+            expectedCallData = callData + "00000000000000000000000000000000000000000000000000000000";
+            return pendingCall.pleaseCallOne.call(textStore.address, callData, { from: owner })
+                .then(results => {
+                    shaKey0 = results[0];
+                    return pendingCall.pleaseCallOne(textStore.address, callData, { from: owner });
+                });
+        });
 
-    var store = TextStore.deployed();
-    var pendingCall = PendingCall.deployed();
-    var data = store.contract.setText.getData("hello3");
-    var key;
+        it("should not be possible to ask to call by another key", function() {
+            return pendingCall.callPending.call(web3.sha3("Not a key"))
+                .then(result =>
+                    assert.strictEqual(result.toNumber(), 0, "should not have gone through"));
+        });
 
-    return pendingCall.pleaseCallOne.call(store.address, data, { gas: 1000000 })
-      .then(function (result) {
-        key = result[0];
-        assert.equal(result[1].toNumber(), 0, "should be return value of pending");
-        return pendingCall.pleaseCallOne(store.address, data, { gas: 1000000 });
-      })
-      .then(function (txn) {
-        return web3.eth.getTransactionReceiptMined(txn);
-      })
-      .then(function (receipt) {
-        return store.text();
-      })
-      .then(function (text) {
-        assert.equal(text, "hello1", "should still be a previous value");
-        return pendingCall.callPending.call(key, { gas: 1000000 } );
-      })
-      .then(function (result) {
-        assert.equal(result.toNumber(), 1, "should be return value of passed-on with true");
-        return pendingCall.callPending(key, { gas: 1000000 });
-      })
-      .then(function (txn) {
-        return web3.eth.getTransactionReceiptMined(txn);
-      })
-      .then(function (receipt) {
-        return store.text();
-      })
-      .then(function (text) {
-        assert.equal(text, "hello3", "should have been set");        
-      });
+        it("should be possible to ask to call by key, same sender", function() {
+            return pendingCall.callPending.call(shaKey0, { from: owner })
+                .then(result => {
+                    assert.strictEqual(result.toNumber(), 1, "should have gone through");
+                    return pendingCall.callPending(shaKey0, { from: owner });
+                })
+                .then(txObject => {
+                    assert.strictEqual(txObject.receipt.logs.length, 1, "should have had 1 event");
+                    var event0 = textStore.OnTextSet().formatter(txObject.receipt.logs[0]);
+                    assert.strictEqual(
+                        event0.args.text,
+                        "Hello World", "should be the asked text");
+                    assert.strictEqual(
+                        event0.args.data, expectedCallData,
+                        "should match sent to textStore");
+                    return pendingCall.pendingOnes(shaKey0);
+                })
+                .then(pendingOne => assert.strictEqual(
+                    pendingOne[0].toNumber(), 2,
+                    "should have increased the call count"));
+        });
 
-  });
+        it("should be possible to ask to call by key, other sender", function() {
+            return pendingCall.callPending.call(shaKey0, { from: requester })
+                .then(result => {
+                    assert.strictEqual(result.toNumber(), 1, "should have gone through");
+                    return pendingCall.callPending(shaKey0, { from: requester });
+                })
+                .then(txObject => {
+                    assert.strictEqual(txObject.receipt.logs.length, 1, "should have had 1 event");
+                    var event0 = textStore.OnTextSet().formatter(txObject.receipt.logs[0]);
+                    assert.strictEqual(
+                        event0.args.text,
+                        "Hello World", "should be the asked text");
+                    assert.strictEqual(
+                        event0.args.data, expectedCallData,
+                        "should match sent to textStore");
+                    return pendingCall.pendingOnes(shaKey0);
+                })
+                .then(pendingOne => assert.strictEqual(
+                    pendingOne[0].toNumber(), 2,
+                    "should have increased the call count"));
+        });
+
+        it("should be possible to ask to call by same values, same sender", function() {
+            return pendingCall.pleaseCallOne.call(textStore.address, callData, { from: owner })
+                .then(result => {
+                    assert.strictEqual(result[1].toNumber(), 1, "should have gone through");
+                    return pendingCall.pleaseCallOne(textStore.address, callData, { from: owner });
+                })
+                .then(txObject => {
+                    assert.strictEqual(txObject.receipt.logs.length, 1, "should have had 1 event");
+                    var event0 = textStore.OnTextSet().formatter(txObject.receipt.logs[0]);
+                    assert.strictEqual(
+                        event0.args.text,
+                        "Hello World", "should be the asked text");
+                    assert.strictEqual(
+                        event0.args.data, expectedCallData,
+                        "should match sent to textStore");
+                    return pendingCall.pendingOnes(shaKey0);
+                })
+                .then(pendingOne => assert.strictEqual(
+                    pendingOne[0].toNumber(), 2,
+                    "should have increased the call count"));
+        });
+
+        it("should be possible to ask to call by same values, other sender", function() {
+            return pendingCall.pleaseCallOne.call(textStore.address, callData, { from: requester })
+                .then(result => {
+                    assert.strictEqual(result[1].toNumber(), 1, "should have gone through");
+                    return pendingCall.pleaseCallOne(textStore.address, callData, { from: requester });
+                })
+                .then(txObject => {
+                    assert.strictEqual(txObject.receipt.logs.length, 1, "should have had 1 event");
+                    var event0 = textStore.OnTextSet().formatter(txObject.receipt.logs[0]);
+                    assert.strictEqual(
+                        event0.args.text,
+                        "Hello World", "should be the asked text");
+                    assert.strictEqual(
+                        event0.args.data, expectedCallData,
+                        "should match sent to textStore");
+                    return pendingCall.pendingOnes(shaKey0);
+                })
+                .then(pendingOne => assert.strictEqual(
+                    pendingOne[0].toNumber(), 2,
+                    "should have increased the call count"));
+        });
+
+    });
 
 });
