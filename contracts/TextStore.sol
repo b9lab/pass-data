@@ -1,14 +1,19 @@
-pragma solidity ^0.4.5;
+pragma solidity ^0.4.10;
 
 contract TextStore {
     string public text;
 
-    event OnTextSet(string text, bytes data);
+    event LogTextSet(address indexed sender, string text, bytes data);
+    event LogFallback(address indexed sender, bytes data);
 
     function setText(string newText) 
         returns (bool success) {
         text = newText;
-        OnTextSet(newText, msg.data);
+        LogTextSet(msg.sender, newText, msg.data);
         success = true;
+    }
+
+    function() {
+        LogFallback(msg.sender, msg.data);
     }
 }

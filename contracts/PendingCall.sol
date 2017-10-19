@@ -1,4 +1,4 @@
-pragma solidity ^0.4.5;
+pragma solidity ^0.4.10;
 
 contract PendingCall {
     // Call with full data
@@ -9,13 +9,14 @@ contract PendingCall {
     }
 
     mapping(bytes32 => PendingOne) public pendingOnes;
+    event LogOneCalled(address indexed sender, bytes32 indexed key, uint result);
 
     function pleaseCallOne(
         address newContractAddress, 
         bytes newData) 
         returns (bytes32 key, uint8 result) {
         key = sha3(newContractAddress, newData);
-        PendingOne pendingOne = pendingOnes[key];
+        PendingOne storage pendingOne = pendingOnes[key];
         if (pendingOne.count > 0) {
             result = effectCall(pendingOne);
         } else {
@@ -24,16 +25,18 @@ contract PendingCall {
             pendingOne.data = newData;
             result = 0;
         }
+        LogOneCalled(msg.sender, key, result);
     }
 
     function callPending(bytes32 key) 
         returns (uint8 result) {
-        PendingOne pendingOne = pendingOnes[key];
+        PendingOne storage pendingOne = pendingOnes[key];
         if (pendingOne.count > 0) {
             result = effectCall(pendingOne);
         } else {
             result = 0;
         }
+        LogOneCalled(msg.sender, key, result);
     }
 
     function effectCall(PendingOne storage pendingOne) 
