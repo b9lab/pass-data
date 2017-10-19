@@ -1,0 +1,28 @@
+{
+  "name": "pass_data",
+  "version": "1.0.0",
+  "description": "`PendingCall` demonstrates the use of call data and how it can be used to delay calls to a contract function.",
+  "main": "truffle.js",
+  "directories": {
+    "test": "test"
+  },
+  "dependencies": {
+    "bluebird": "^3.5.1",
+    "truffle": "^3.2.1",
+    "web3": "^0.18.2"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/b9lab/pass-data.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/b9lab/pass-data/issues"
+  },
+  "homepage": "https://github.com/b9lab/pass-data#readme"
+}
