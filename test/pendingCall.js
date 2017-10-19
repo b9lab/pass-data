@@ -2,9 +2,8 @@ const Promise = require("bluebird");
 const TextStore = artifacts.require("./TextStore.sol");
 const PendingCall = artifacts.require("./PendingCall.sol");
 
-const Extensions = require("../utils/extensions.js");
-Extensions.init(web3, assert);
 Promise.all = require("../utils/sequentialPromise.js");
+makeSureAreUnlocked = require("../utils/makeSureAreUnlocked.js");
 
 contract('PendingCall', function(accounts) {
 
@@ -14,7 +13,7 @@ contract('PendingCall', function(accounts) {
     before("should have unlocked accounts", () => {
         assert.isAtLeast(accounts.length, 2, "should have at least 2 account");
         [ owner, requester ] = accounts;
-        return Extensions.makeSureAreUnlocked([ owner, requester ]);
+        return makeSureAreUnlocked([ owner, requester ]);
     });
 
     beforeEach("should deploy a TextStore and a PendingCall", function() {

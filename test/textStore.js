@@ -1,7 +1,11 @@
+const Promise = require("bluebird");
 const TextStore = artifacts.require("./TextStore.sol");
 
-const Extensions = require("../utils/extensions.js");
-Extensions.init(web3, assert);
+web3.eth.getTransactionReceiptMined = require("../utils/getTransactionReceiptMined.js");
+if (web3.eth.callPromise !== "function") {
+    Promise.promisifyAll(web3.eth, { suffix: "Promise" });
+}
+makeSureAreUnlocked = require("../utils/makeSureAreUnlocked.js");
 
 contract('TextStore', function(accounts) {
 
@@ -10,7 +14,7 @@ contract('TextStore', function(accounts) {
     before("should have unlocked accounts", () => {
         assert.isAtLeast(accounts.length, 1, "should have at least 1 account");
         owner = accounts[0];
-        return Extensions.makeSureAreUnlocked([ owner ]);
+        return makeSureAreUnlocked([ owner ]);
     });
 
     beforeEach("should deploy a TextStore", function() {
@@ -50,7 +54,7 @@ contract('TextStore', function(accounts) {
     });
 
     describe("with call data", function() {
-        
+
         it("should return proper return data when using call data", function() {
             const callData = textStore.contract.setText.getData("Hello World");
             return web3.eth.callPromise({
@@ -70,7 +74,7 @@ contract('TextStore', function(accounts) {
                     data: callData,
                     gas: 500000
                 })
-                .then(web3.eth.getTransactionReceiptMined)
+                .then(tx => web3.eth.getTransactionReceiptMined(tx))
                 .then(receipt => {
                     assert.strictEqual(receipt.logs.length, 1, "should have had 1 event");
                     const event0 = textStore.LogTextSet().formatter(receipt.logs[0]);
@@ -90,7 +94,7 @@ contract('TextStore', function(accounts) {
                     data: callData,
                     gas: 500000
                 })
-                .then(web3.eth.getTransactionReceiptMined)
+                .then(tx => web3.eth.getTransactionReceiptMined(tx))
                 .then(receipt => textStore.text())
                 .then(text => assert.strictEqual(text, "Hello World", "should be set"));
         });
@@ -105,7 +109,7 @@ contract('TextStore', function(accounts) {
                 data: callData,
                 gas: 500000
             })
-            .then(web3.eth.getTransactionReceiptMined)
+            .then(tx => web3.eth.getTransactionReceiptMined(tx))
             .then(receipt => {
                 assert.strictEqual(receipt.logs.length, 1, "should have had 1 event");
                 const event0 = textStore.LogFallback().formatter(receipt.logs[0]);
